@@ -1,111 +1,244 @@
-import { useState, useEffect, useRef } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import {
+    ArrowDownToLine,
+    Check,
+    ImagePlus,
+    LoaderCircle,
+    Pencil,
+    Plus,
+    RotateCcw,
+    Send,
+    Trash2,
+    X,
+} from "lucide-react";
+import { chatApi } from "../api/chatApi";
+import { ChatPreview } from "../components/chat-preview";
 import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "../ui/select";
-import { ChatPreview } from "../components/chat-preview";
-import { RefreshCw, Download, Upload, Trash2, Sparkles, Loader2 } from "lucide-react";
-import { chatApi } from "../api/chatApi";
+import { Textarea } from "../ui/textarea";
 
-export function BuilderPage({ config: initialConfig }) {
-    const [config, setConfig] = useState(
-        initialConfig || {
-            platform: "whatsapp",
-            title: "My Chat",
-            subtitle: "online",
-            theme: "light",
-        }
-    );
+const PLATFORMS = [
+    { id: "whatsapp", name: "WhatsApp", mark: "W", detail: "Friendly, familiar chats" },
+    { id: "instagram", name: "Instagram DM", mark: "IG", detail: "A direct-message look" },
+    { id: "chatgpt", name: "ChatGPT", mark: "GPT", detail: "User and assistant replies" },
+];
+const VALID_PLATFORMS = PLATFORMS.map((platform) => platform.id);
+
+function platformLabel(platform) {
+    return PLATFORMS.find((item) => item.id === platform)?.name || "WhatsApp";
+}
+
+export function BuilderPage() {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const requestedPlatform = searchParams.get("platform");
+    const requestedChat = searchParams.get("chat");
+    const [config, setConfig] = useState(() => ({
+        platform: VALID_PLATFORMS.includes(requestedPlatform) ? requestedPlatform : "whatsapp",
+        title: "My Chat",
+        subtitle: "online",
+        theme: "light",
+        myName: "You",
+        otherName: "Friend",
+    }));
     const [messages, setMessages] = useState([]);
     const [sender, setSender] = useState("me");
-    const [messageType, setMessageType] = useState("text");
     const [messageText, setMessageText] = useState("");
     const [timestamp, setTimestamp] = useState("12:30 PM");
-
+    const [editingId, setEditingId] = useState(null);
     const [chatId, setChatId] = useState(null);
     const [meId, setMeId] = useState(null);
     const [otherId, setOtherId] = useState(null);
     const [previewUrl, setPreviewUrl] = useState(null);
     const [isSyncing, setIsSyncing] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
-
+    const [isExporting, setIsExporting] = useState(false);
+    const [errorMessage, setErrorMessage] = useState("");
     const debounceTimer = useRef(null);
+    const avatarInputRef = useRef(null);
+    const previewObjectUrl = useRef(null);
 
-    // Sync configuration with backend
+    const loadPreview = async (targetChatId) => {
+        const response = await chatApi.getChatPreview(targetChatId);
+        const nextUrl = URL.createObjectURL(await response.blob());
+        if (previewObjectUrl.current) URL.revokeObjectURL(previewObjectUrl.current);
+        previewObjectUrl.current = nextUrl;
+        setPreviewUrl(nextUrl);
+    };
+
+    useEffect(() => () => {
+        clearTimeout(debounceTimer.current);
+        if (previewObjectUrl.current) URL.revokeObjectURL(previewObjectUrl.current);
+    }, []);
+
     useEffect(() => {
-        if (!chatId) return;
+        if (!requestedChat) return undefined;
+        let active = true;
+        chatApi.getChat(requestedChat)
+            .then(async (savedChat) => {
+                if (!active) return;
+                const me = savedChat.participants.find((participant) => participant.role === "me");
+                const other = savedChat.participants.find((participant) => participant.role === "other");
+                setConfig({
+                    platform: savedChat.platform,
+                    title: savedChat.title,
+                    subtitle: savedChat.subtitle,
+                    theme: savedChat.theme,
+                    myName: me?.name || "You",
+                    otherName: other?.name || "Friend",
+                });
+                setMessages(savedChat.messages.map((message) => ({
+                    id: message.id,
+                    sender: message.sender_role,
+                    text: message.content,
+                    timestamp: message.timestamp,
+                    type: message.message_type,
+                    direction: message.direction,
+                })));
+                setChatId(savedChat.id);
+                setMeId(me?.id || null);
+                setOtherId(other?.id || null);
+                await loadPreview(savedChat.id);
+            })
+            .catch((error) => {
+                console.error("Could not load saved chat:", error);
+                if (active) setErrorMessage(`Could not load this chat: ${error.message}`);
+            });
+        return () => {
+            active = false;
+        };
+    }, [requestedChat]);
 
-        if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    useEffect(() => {
+        if (!chatId) return undefined;
 
+        clearTimeout(debounceTimer.current);
         debounceTimer.current = setTimeout(async () => {
             setIsSyncing(true);
             try {
                 await chatApi.updateChat(chatId, config);
-                setPreviewUrl(chatApi.getPreviewUrl(chatId));
+                await loadPreview(chatId);
+                setErrorMessage("");
             } catch (error) {
-                console.error("Failed to sync config:", error);
+                console.error("Failed to sync chat settings:", error);
+                setErrorMessage(`Could not save your chat settings: ${error.message}`);
             } finally {
                 setIsSyncing(false);
             }
-        }, 1000);
+        }, 650);
 
         return () => clearTimeout(debounceTimer.current);
     }, [config, chatId]);
 
-    const handleAddMessage = async () => {
-        if (!messageText.trim()) return;
+    const updateConfig = (key, value) => {
+        setConfig((current) => ({ ...current, [key]: value }));
+    };
 
+    const selectPlatform = (platform) => {
+        setConfig((current) => ({
+            ...current,
+            platform,
+            theme: platform === "whatsapp" ? "light" : current.theme,
+        }));
+    };
+
+    const clearEditor = () => {
+        setEditingId(null);
+        setMessageText("");
+        setTimestamp("12:30 PM");
+    };
+
+    const handleAddMessage = async (event) => {
+        event.preventDefault();
+        const content = messageText.trim();
+        if (!content || isSyncing) return;
+
+        setIsSyncing(true);
+        setErrorMessage("");
         try {
             let currentChatId = chatId;
-            let currentMeId = meId;
-            let currentOtherId = otherId;
-
             if (!currentChatId) {
-                setIsSyncing(true);
-                const chatRes = await chatApi.createChat(config);
-                currentChatId = chatRes.chat_id;
-                currentMeId = chatRes.me_id;
-                currentOtherId = chatRes.other_id;
+                const created = await chatApi.createChat(config);
+                currentChatId = created.chat_id;
                 setChatId(currentChatId);
-                setMeId(currentMeId);
-                setOtherId(currentOtherId);
+                setMeId(created.me_id);
+                setOtherId(created.other_id);
             }
 
-            const senderId = sender === "me" ? currentMeId : currentOtherId;
             const direction = sender === "me" ? "outbound" : "inbound";
-
-            await chatApi.addMessage(currentChatId, {
-                sender_id: senderId,
-                type: messageType,
-                content: messageText,
-                timestamp: timestamp,
-                direction: direction,
+            const result = await chatApi.addMessage(currentChatId, {
+                sender_role: sender,
+                type: "text",
+                content,
+                timestamp,
+                direction,
             });
 
-            const newMessage = {
-                id: Date.now().toString(),
-                sender,
-                text: messageText,
-                timestamp,
-                type: messageType,
-                direction,
-            };
-
-            setMessages([...messages, newMessage]);
-            setMessageText("");
-            setPreviewUrl(chatApi.getPreviewUrl(currentChatId));
+            setMessages((current) => [
+                ...current,
+                {
+                    id: result.message_id,
+                    sender,
+                    text: content,
+                    timestamp,
+                    type: "text",
+                    direction,
+                },
+            ]);
+            clearEditor();
+            await loadPreview(currentChatId);
         } catch (error) {
-            console.error(error);
-            alert("Failed to sync with backend: " + error.message);
+            console.error("Failed to add message:", error);
+            setErrorMessage(`Could not add your message: ${error.message}`);
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    const handleEditMessage = async (message) => {
+        setEditingId(message.id);
+        setSender(message.sender);
+        setMessageText(message.text);
+        setTimestamp(message.timestamp);
+        document.getElementById("message-content")?.focus();
+    };
+
+    const handleSaveEdit = async (event) => {
+        event.preventDefault();
+        const content = messageText.trim();
+        if (!chatId || !editingId || !content || isSyncing) return;
+
+        setIsSyncing(true);
+        setErrorMessage("");
+        try {
+            await chatApi.updateMessage(chatId, editingId, { content, timestamp });
+            setMessages((current) => current.map((message) => (
+                message.id === editingId ? { ...message, text: content, timestamp } : message
+            )));
+            clearEditor();
+            await loadPreview(chatId);
+        } catch (error) {
+            console.error("Failed to update message:", error);
+            setErrorMessage(`Could not update your message: ${error.message}`);
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    const handleDeleteMessage = async (message) => {
+        if (!chatId || isSyncing) return;
+
+        setIsSyncing(true);
+        setErrorMessage("");
+        try {
+            await chatApi.deleteMessage(chatId, message.id);
+            setMessages((current) => current.filter((item) => item.id !== message.id));
+            if (editingId === message.id) clearEditor();
+            await loadPreview(chatId);
+        } catch (error) {
+            console.error("Failed to delete message:", error);
+            setErrorMessage(`Could not remove your message: ${error.message}`);
         } finally {
             setIsSyncing(false);
         }
@@ -113,300 +246,433 @@ export function BuilderPage({ config: initialConfig }) {
 
     const handleAvatarUpload = async (event) => {
         const file = event.target.files?.[0];
-        if (!file || !chatId) return;
+        event.target.value = "";
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            setErrorMessage("Choose an image file to use as a profile photo.");
+            return;
+        }
+        if (!chatId) return;
 
         setIsUploading(true);
+        setErrorMessage("");
         try {
-            // Upload for the current sender
-            const targetId = sender === "me" ? meId : otherId;
-            await chatApi.uploadAvatar(targetId, file);
-            setPreviewUrl(chatApi.getPreviewUrl(chatId));
+            await chatApi.uploadAvatar(sender === "me" ? meId : otherId, file);
+            await loadPreview(chatId);
         } catch (error) {
             console.error("Avatar upload failed:", error);
-            alert("Failed to upload avatar");
+            setErrorMessage(`Could not upload the profile photo: ${error.message}`);
         } finally {
             setIsUploading(false);
         }
     };
 
-    const handleDownloadImage = () => {
-        if (previewUrl) {
-            window.open(previewUrl, "_blank");
-        } else {
-            alert("No message added yet to generate a preview!");
+    const handleDownloadImage = async () => {
+        if (!previewUrl || isExporting) return;
+
+        setIsExporting(true);
+        setErrorMessage("");
+        try {
+            const response = await chatApi.generateChatImage(chatId);
+            const image = await response.blob();
+            const downloadUrl = URL.createObjectURL(image);
+            const link = document.createElement("a");
+            link.href = downloadUrl;
+            link.download = `chattiebaby-${config.platform}.png`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+        } catch (error) {
+            console.error("Image export failed:", error);
+            setErrorMessage(`Could not export the image: ${error.message}`);
+        } finally {
+            setIsExporting(false);
         }
     };
 
+    const startNewChat = () => {
+        clearTimeout(debounceTimer.current);
+        const nextSearchParams = new URLSearchParams(searchParams);
+        nextSearchParams.delete("chat");
+        nextSearchParams.set("platform", config.platform);
+        setSearchParams(nextSearchParams, { replace: true });
+        clearEditor();
+        setMessages([]);
+        setChatId(null);
+        setMeId(null);
+        setOtherId(null);
+        if (previewObjectUrl.current) URL.revokeObjectURL(previewObjectUrl.current);
+        previewObjectUrl.current = null;
+        setPreviewUrl(null);
+        setSender("me");
+        setErrorMessage("");
+    };
+
+    const selectedPlatform = platformLabel(config.platform);
+    const otherLabel = config.platform === "chatgpt" ? "Assistant" : "Other person";
+
     return (
-        <div className="flex-1 overflow-y-auto bg-zinc-950">
-            <div className="w-full min-h-screen flex flex-col lg:flex-row divide-x divide-zinc-800/50">
-                {/* Column 1: Configuration */}
-                <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex-1 bg-zinc-900/10 backdrop-blur-3xl h-screen overflow-y-auto"
-                >
-                    <Card className="rounded-none border-none shadow-none h-full bg-transparent">
-                        <CardHeader className="border-b border-zinc-800/50 bg-zinc-900/30 p-8 backdrop-blur-xl">
-                            <CardTitle className="text-zinc-50 flex items-center gap-3">
-                                <div className="size-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700/50 shadow-inner">
-                                    <Sparkles className="size-5 text-zinc-400" />
-                                </div>
-                                <div className="space-y-0.5">
-                                    <span className="text-lg font-bold tracking-tight text-white">Configuration</span>
-                                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.2em]">Design System</p>
-                                </div>
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-10 space-y-10">
-                            <div className="grid grid-cols-2 gap-8">
-                                <div className="space-y-4">
-                                    <Label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Platform</Label>
-                                    <Select
-                                        value={config.platform}
-                                        onValueChange={(value) =>
-                                            setConfig({ ...config, platform: value })
-                                        }
-                                    >
-                                        <SelectTrigger className="h-12 rounded-xl bg-zinc-800/30 border-zinc-700/50 text-zinc-100 focus:bg-zinc-800/50 transition-all">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-100">
-                                            <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                                            <SelectItem value="instagram">Instagram</SelectItem>
-                                            <SelectItem value="chatgpt">ChatGPT</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-4">
-                                    <Label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Theme</Label>
-                                    <Select
-                                        value={config.theme}
-                                        onValueChange={(value) =>
-                                            setConfig({ ...config, theme: value })
-                                        }
-                                    >
-                                        <SelectTrigger className="h-12 rounded-xl bg-zinc-800/30 border-zinc-700/50 text-zinc-100 focus:bg-zinc-800/50 transition-all">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-100">
-                                            <SelectItem value="light">Light</SelectItem>
-                                            <SelectItem value="dark">Dark</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
+        <div className="generator-page">
+            <section className="page-intro page-intro--wide">
+                <div>
+                    <span className="eyebrow">The chat generator</span>
+                    <h1>Build the conversation.</h1>
+                    <p className="page-intro__copy">
+                        Write a fictional exchange and turn it into a chat-style image.
+                    </p>
+                </div>
+                <div className="creation-steps" aria-label="Creation steps">
+                    <span><b>01</b> Set up</span>
+                    <span className="creation-steps__divider" />
+                    <span><b>02</b> Write</span>
+                    <span className="creation-steps__divider" />
+                    <span><b>03</b> Save</span>
+                </div>
+            </section>
+
+            {errorMessage && (
+                <div className="feedback-message" role="alert">{errorMessage}</div>
+            )}
+
+            <section className="platform-picker" aria-labelledby="platform-heading">
+                <div className="platform-picker__heading">
+                    <div>
+                        <span className="eyebrow">Choose a style</span>
+                        <h2 id="platform-heading">Where does the chat happen?</h2>
+                    </div>
+                    <span className="fictional-note">Fictional conversations only</span>
+                </div>
+                <div className="platform-choices" role="group" aria-label="Chat platform">
+                    {PLATFORMS.map((platform) => (
+                        <button
+                            type="button"
+                            key={platform.id}
+                            className={`platform-choice${config.platform === platform.id ? " is-selected" : ""}`}
+                            aria-pressed={config.platform === platform.id}
+                            onClick={() => selectPlatform(platform.id)}
+                        >
+                            <span className="platform-choice__mark">{platform.mark}</span>
+                            <span>
+                                <strong>{platform.name}</strong>
+                                <small>{platform.detail}</small>
+                            </span>
+                            {config.platform === platform.id && <Check size={16} />}
+                        </button>
+                    ))}
+                </div>
+            </section>
+
+            <div className="workspace-grid">
+                <section className="workspace-panel setup-panel" aria-labelledby="setup-title">
+                    <div className="panel-heading">
+                        <span className="step-number">01</span>
+                        <div>
+                            <h2 id="setup-title">Set up your chat</h2>
+                            <p>Choose the names and look for the conversation.</p>
+                        </div>
+                    </div>
+
+                    <div className="panel-fields">
+                        <div className="field-pair">
+                            <div className="form-field">
+                                <Label htmlFor="theme">Appearance</Label>
+                                <select
+                                    id="theme"
+                                    className="form-control"
+                                    value={config.theme}
+                                    disabled={config.platform === "whatsapp"}
+                                    onChange={(event) => updateConfig("theme", event.target.value)}
+                                >
+                                    <option value="light">Light</option>
+                                    <option value="dark">Dark</option>
+                                </select>
                             </div>
-                            <div className="space-y-4">
-                                <Label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Chat Title</Label>
+                            <div className="form-field">
+                                <Label htmlFor="chat-subtitle">Status line</Label>
                                 <Input
-                                    value={config.title}
-                                    onChange={(e) =>
-                                        setConfig({ ...config, title: e.target.value })
-                                    }
-                                    className="h-12 rounded-xl bg-zinc-800/30 border-zinc-700/50 text-zinc-100 transition-all focus:bg-zinc-800/50 focus:border-zinc-600 placeholder:text-zinc-600"
-                                    placeholder="Enter chat title..."
-                                />
-                            </div>
-                            <div className="space-y-4">
-                                <Label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Subtitle</Label>
-                                <Input
+                                    id="chat-subtitle"
                                     value={config.subtitle}
-                                    onChange={(e) =>
-                                        setConfig({ ...config, subtitle: e.target.value })
-                                    }
-                                    className="h-12 rounded-xl bg-zinc-800/30 border-zinc-700/50 text-zinc-100 transition-all focus:bg-zinc-800/50 focus:border-zinc-600 placeholder:text-zinc-600"
-                                    placeholder="e.g. online, typing..."
+                                    onChange={(event) => updateConfig("subtitle", event.target.value)}
+                                    className="form-control"
+                                    placeholder="online, typing..."
+                                    maxLength={80}
                                 />
                             </div>
-                        </CardContent>
-                    </Card>
-                </motion.div>
+                        </div>
+                        <div className="form-field">
+                            <Label htmlFor="chat-title">Conversation title</Label>
+                            <Input
+                                id="chat-title"
+                                value={config.title}
+                                onChange={(event) => updateConfig("title", event.target.value)}
+                                className="form-control"
+                                placeholder="Give this chat a name"
+                                maxLength={80}
+                            />
+                        </div>
+                        <div className="field-divider" />
+                        <div className="form-field">
+                            <Label htmlFor="my-name">Your name</Label>
+                            <Input
+                                id="my-name"
+                                value={config.myName}
+                                onChange={(event) => updateConfig("myName", event.target.value)}
+                                className="form-control"
+                                placeholder="You"
+                                maxLength={60}
+                            />
+                        </div>
+                        <div className="form-field">
+                            <Label htmlFor="other-name">{otherLabel}&apos;s name</Label>
+                            <Input
+                                id="other-name"
+                                value={config.otherName}
+                                onChange={(event) => updateConfig("otherName", event.target.value)}
+                                className="form-control"
+                                placeholder="Friend or character"
+                                maxLength={60}
+                            />
+                        </div>
+                        <div className="helper-note">
+                            <span className="helper-note__line" />
+                            {config.platform === "whatsapp"
+                                ? "WhatsApp keeps its original light Pillow renderer."
+                                : "Changes sync with the Pillow preview after you create the first message."}
+                        </div>
+                    </div>
+                </section>
 
-                {/* Column 2: Message Studio */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex-1 bg-zinc-900/10 backdrop-blur-3xl h-screen overflow-y-auto"
-                >
-                    <Card className="rounded-none border-none shadow-none h-full bg-transparent">
-                        <CardHeader className="border-b border-zinc-800/50 bg-zinc-900/30 p-8 backdrop-blur-xl">
-                            <CardTitle className="text-white flex items-center gap-3">
-                                <div className="size-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700/50 shadow-inner">
-                                    <Sparkles className="size-5 text-zinc-400" />
+                <section className="workspace-panel compose-panel" aria-labelledby="compose-title">
+                    <div className="panel-heading">
+                        <span className="step-number">02</span>
+                        <div>
+                            <h2 id="compose-title">Write the conversation</h2>
+                            <p>Add, edit, or remove individual messages.</p>
+                        </div>
+                    </div>
+
+                    <div className="message-list" aria-label="Conversation messages">
+                        {messages.length === 0 ? (
+                            <div className="message-list__empty">
+                                <span className="message-list__empty-icon">Aa</span>
+                                <strong>Your first line sets the scene.</strong>
+                                <span>Write a message below to get started.</span>
+                            </div>
+                        ) : messages.map((message, index) => (
+                            <article
+                                className={`message-row${message.sender === "me" ? " message-row--mine" : ""}`}
+                                key={message.id}
+                            >
+                                <div className="message-row__meta">
+                                    <span>{message.sender === "me" ? config.myName || "You" : config.otherName || "Friend"}</span>
+                                    <time>{message.timestamp}</time>
                                 </div>
-                                <div className="space-y-0.5">
-                                    <span className="text-lg font-bold tracking-tight text-white">Message Studio</span>
-                                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.2em]">Chat Composer</p>
-                                </div>
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-10 space-y-10">
-                            <div className="grid grid-cols-2 gap-8">
-                                <div className="space-y-4">
-                                    <Label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Sender</Label>
-                                    <Select
-                                        value={sender}
-                                        onValueChange={(value) => setSender(value)}
+                                <p>{message.text}</p>
+                                <div className="message-row__actions">
+                                    <button
+                                        type="button"
+                                        className="icon-button"
+                                        onClick={() => handleEditMessage(message)}
+                                        aria-label={`Edit message ${index + 1}`}
+                                        disabled={isSyncing}
                                     >
-                                        <SelectTrigger className="h-12 rounded-xl bg-zinc-800/30 border-zinc-700/50 text-zinc-100 focus:bg-zinc-800/50 transition-all">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-100">
-                                            <SelectItem value="me">Me (Right)</SelectItem>
-                                            <SelectItem value="other">Other (Left)</SelectItem>
-                                        </SelectContent>
-                                    </Select>
+                                        <Pencil size={14} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="icon-button icon-button--danger"
+                                        onClick={() => handleDeleteMessage(message)}
+                                        aria-label={`Delete message ${index + 1}`}
+                                        disabled={isSyncing}
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
                                 </div>
-                                <div className="space-y-4">
-                                    <Label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Timestamp</Label>
-                                    <Input
-                                        value={timestamp}
-                                        onChange={(e) => setTimestamp(e.target.value)}
-                                        className="h-12 rounded-xl bg-zinc-800/30 border-zinc-700/50 text-zinc-100 focus:bg-zinc-800/50 focus:border-zinc-600"
-                                    />
-                                </div>
-                            </div>
+                            </article>
+                        ))}
+                    </div>
 
-                            <div className="space-y-4">
-                                <Label className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">Message Content</Label>
-                                <Textarea
-                                    placeholder="Type your message..."
-                                    value={messageText}
-                                    onChange={(e) => setMessageText(e.target.value)}
-                                    className="min-h-[140px] rounded-2xl bg-zinc-800/30 border-zinc-700/50 text-zinc-100 focus:bg-zinc-800/50 focus:border-zinc-600 resize-none p-5 placeholder:text-zinc-600"
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter" && !e.shiftKey) {
-                                            e.preventDefault();
-                                            handleAddMessage();
-                                        }
-                                    }}
+                    <form
+                        className="panel-fields composer-form"
+                        onSubmit={editingId ? handleSaveEdit : handleAddMessage}
+                    >
+                        <div className="field-pair">
+                            <div className="form-field">
+                                <Label htmlFor="sender">Speaking as</Label>
+                                <select
+                                    id="sender"
+                                    className="form-control"
+                                    value={sender}
+                                    onChange={(event) => setSender(event.target.value)}
+                                >
+                                    <option value="me">{config.myName || "You"} · outgoing</option>
+                                    <option value="other">{config.otherName || otherLabel} · incoming</option>
+                                </select>
+                            </div>
+                            <div className="form-field">
+                                <Label htmlFor="timestamp">Time</Label>
+                                <Input
+                                    id="timestamp"
+                                    value={timestamp}
+                                    onChange={(event) => setTimestamp(event.target.value)}
+                                    className="form-control"
+                                    placeholder="12:30 PM"
+                                    maxLength={24}
                                 />
-                                <div className="flex items-center gap-2 px-1">
-                                    <div className="size-1 rounded-full bg-zinc-700" />
-                                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                                        Press Enter to quick send
-                                    </p>
-                                </div>
                             </div>
-
+                        </div>
+                        <div className="form-field message-field">
+                            <Label htmlFor="message-content">{editingId ? "Edit message" : "Message"}</Label>
+                            <Textarea
+                                id="message-content"
+                                placeholder="What happens next?"
+                                value={messageText}
+                                onChange={(event) => setMessageText(event.target.value)}
+                                className="form-control message-input"
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter" && !event.shiftKey) {
+                                        event.preventDefault();
+                                        event.currentTarget.form?.requestSubmit();
+                                    }
+                                }}
+                            />
+                            <span className="field-hint">Enter to add · Shift + Enter for a new line</span>
+                        </div>
+                        <div className="button-row composer-actions">
                             <Button
-                                onClick={handleAddMessage}
-                                disabled={isSyncing}
-                                className="w-full bg-zinc-100 hover:bg-white text-zinc-950 rounded-2xl h-14 font-bold uppercase tracking-[0.15em] text-[11px] transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(255,255,255,0.1)]"
+                                type="submit"
+                                disabled={isSyncing || !messageText.trim()}
+                                className="action-button action-button--primary"
                             >
                                 {isSyncing ? (
-                                    <Loader2 className="size-4 mr-2 animate-spin" />
+                                    <LoaderCircle className="icon-spin" size={17} />
+                                ) : editingId ? (
+                                    <Check size={16} />
                                 ) : (
-                                    <Sparkles className="size-4 mr-2" />
+                                    <Plus size={17} />
                                 )}
-                                Add Message
+                                {isSyncing ? "Saving…" : editingId ? "Save changes" : "Add message"}
                             </Button>
-
-                            <div className="pt-6 border-t border-zinc-800/50">
-                                <input
-                                    type="file"
-                                    id="avatar-upload"
-                                    className="hidden"
-                                    accept="image/*"
-                                    onChange={handleAvatarUpload}
-                                    disabled={!chatId || isUploading}
-                                />
+                            {editingId && (
                                 <Button
+                                    type="button"
                                     variant="outline"
-                                    onClick={() => document.getElementById("avatar-upload").click()}
-                                    disabled={!chatId || isUploading}
-                                    className="w-full border-zinc-700/50 text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-100 rounded-2xl h-14 font-bold transition-all border-dashed"
+                                    onClick={clearEditor}
+                                    className="action-button action-button--secondary"
                                 >
-                                    {isUploading ? (
-                                        <Loader2 className="size-4 mr-2 animate-spin" />
-                                    ) : (
-                                        <Upload className="size-4 mr-2" />
-                                    )}
-                                    {chatId ? `Upload ${sender === "me" ? "My" : "Other"} Avatar` : "Create Chat First"}
+                                    <X size={16} /> Cancel
                                 </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </motion.div>
+                            )}
+                        </div>
 
-                {/* Column 3: Live Preview */}
-                <motion.div
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex-1 bg-zinc-950/50 h-screen overflow-y-auto"
-                >
-                    <Card className="rounded-none border-none shadow-none h-full bg-transparent">
-                        <CardHeader className="border-b border-zinc-800/50 bg-zinc-900/40 p-8 backdrop-blur-xl">
-                            <CardTitle className="text-white flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="size-10 rounded-xl bg-zinc-800 flex items-center justify-center border border-zinc-700/50 shadow-inner">
-                                        <Sparkles className="size-5 text-zinc-400" />
-                                    </div>
-                                    <div className="space-y-0.5">
-                                        <span className="text-lg font-bold tracking-tight text-white">Live Preview</span>
-                                        <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.2em]">Studio Render</p>
-                                    </div>
-                                </div>
-                                {chatId && (
-                                    <div className="flex items-center gap-3 px-4 py-1.5 bg-zinc-800/50 border border-zinc-700/50 rounded-full shadow-sm backdrop-blur-md">
-                                        <div className={`size-2 rounded-full ${isSyncing ? "bg-amber-500 animate-spin" : "bg-emerald-500 animate-pulse"} shadow-[0_0_8px_rgba(16,185,129,0.5)]`} />
-                                        <span className="text-zinc-200 text-[10px] font-bold uppercase tracking-widest">
-                                            {isSyncing ? "Syncing..." : "Live Studio"}
-                                        </span>
-                                    </div>
-                                )}
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-10 space-y-10">
-                            <div className="relative min-h-[calc(100vh-280px)] flex items-center justify-center rounded-3xl bg-zinc-900/30 border border-zinc-800/50 shadow-[inset_0_2px_12px_rgba(0,0,0,0.1)] overflow-hidden">
-                                <div className="absolute inset-0 bg-[radial-gradient(#18181b_1px,transparent_1px)] [background-size:24px_24px] opacity-40" />
-                                
-                                {previewUrl ? (
-                                    <motion.div
-                                        initial={{ opacity: 0, scale: 0.95 }}
-                                        animate={{ opacity: 1, scale: 1 }}
-                                        key={previewUrl}
-                                        className="relative z-10 p-8 w-full max-w-lg"
-                                    >
-                                        <img 
-                                            src={previewUrl} 
-                                            alt="Chat Preview" 
-                                            className="w-full h-auto rounded-3xl shadow-[0_32px_80px_-16px_rgba(0,0,0,0.6)] border border-white/5" 
-                                        />
-                                    </motion.div>
+                        <div className="avatar-section">
+                            <div>
+                                <h3>Profile photo</h3>
+                                <p>
+                                    {chatId
+                                        ? `Upload a photo for ${sender === "me" ? config.myName || "your" : config.otherName || "the other"} side.`
+                                        : "Add the first message to create a chat before uploading a photo."}
+                                </p>
+                            </div>
+                            <input
+                                ref={avatarInputRef}
+                                type="file"
+                                className="visually-hidden"
+                                accept="image/*"
+                                onChange={handleAvatarUpload}
+                                disabled={!chatId || isUploading}
+                                aria-label="Choose a profile photo"
+                            />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => avatarInputRef.current?.click()}
+                                disabled={!chatId || isUploading}
+                                className="action-button action-button--secondary"
+                            >
+                                {isUploading ? (
+                                    <LoaderCircle className="icon-spin" size={17} />
                                 ) : (
-                                    <div className="relative z-10 w-full max-w-lg p-8 opacity-40 grayscale">
-                                        <ChatPreview config={config} messages={messages} />
-                                    </div>
+                                    <ImagePlus size={17} />
                                 )}
-                            </div>
+                                {isUploading ? "Uploading…" : "Choose photo"}
+                            </Button>
+                        </div>
+                    </form>
+                </section>
 
-                            <div className="flex flex-col gap-6">
-                                <div className="flex gap-4">
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => {
-                                            setMessages([]);
-                                            setChatId(null);
-                                            setPreviewUrl(null);
-                                        }}
-                                        className="flex-1 border-zinc-800 text-zinc-400 hover:bg-zinc-900/80 hover:text-zinc-100 rounded-2xl h-14 font-bold transition-all"
-                                    >
-                                        <RefreshCw className="size-4 mr-2" />
-                                        Reset Studio
-                                    </Button>
-                                    <Button
-                                        onClick={handleDownloadImage}
-                                        className="flex-1 bg-zinc-100 hover:bg-white text-zinc-950 rounded-2xl h-14 font-bold uppercase tracking-widest text-[11px] shadow-[0_0_20px_rgba(255,255,255,0.05)] transition-all active:scale-95"
-                                    >
-                                        <Download className="size-4 mr-2" />
-                                        Export Image
-                                    </Button>
-                                </div>
+                <section className="workspace-panel preview-panel" aria-labelledby="preview-title">
+                    <div className="panel-heading panel-heading--preview">
+                        <span className="step-number">03</span>
+                        <div>
+                            <h2 id="preview-title">Preview &amp; export</h2>
+                            <p>Your {selectedPlatform} screenshot.</p>
+                        </div>
+                        <div className={`save-status${isSyncing ? " save-status--busy" : ""}`} role="status">
+                            <span className="save-status__icon">
+                                {isSyncing ? <LoaderCircle className="icon-spin" size={14} /> : <Check size={14} />}
+                            </span>
+                            {isSyncing ? "Updating" : previewUrl ? "Pillow preview" : "Draft preview"}
+                        </div>
+                    </div>
+
+                    <div className={`preview-stage${previewUrl ? " preview-stage--image" : ""}`}>
+                        {previewUrl ? (
+                            <img
+                                key={previewUrl}
+                                className="generated-image"
+                                src={previewUrl}
+                                alt={`Generated ${selectedPlatform} chat screenshot`}
+                                onError={() => {
+                                    setErrorMessage("The generated image could not be loaded. Check the API connection and try again.");
+                                    setPreviewUrl(null);
+                                }}
+                            />
+                        ) : (
+                            <ChatPreview config={config} messages={messages} />
+                        )}
+                    </div>
+
+                    <div className="preview-actions">
+                        <div className="preview-caption">
+                            <span>{messages.length} {messages.length === 1 ? "message" : "messages"}</span>
+                            <span className="preview-caption__separator" />
+                            <span>{selectedPlatform}</span>
+                            <span className="preview-caption__separator" />
+                            <span>{previewUrl ? "Generated image" : "Draft"}</span>
+                        </div>
+                        <div className="button-row">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={startNewChat}
+                                disabled={isSyncing || isUploading || isExporting}
+                                className="action-button action-button--secondary reset-button"
+                            >
+                                <RotateCcw size={16} /> New chat
+                            </Button>
+                            <Button
+                                type="button"
+                                onClick={handleDownloadImage}
+                                disabled={!previewUrl || isExporting}
+                                className="action-button action-button--primary export-button"
+                            >
+                                {isExporting ? (
+                                    <LoaderCircle className="icon-spin" size={17} />
+                                ) : (
+                                    <ArrowDownToLine size={17} />
+                                )}
+                                {isExporting ? "Preparing…" : "Download image"}
+                            </Button>
+                        </div>
+                        {chatId && (
+                            <div className="preview-footnote">
+                                New chat clears this workspace; previous chat records remain on the server.
                             </div>
-                        </CardContent>
-                    </Card>
-                </motion.div>
+                        )}
+                    </div>
+                </section>
             </div>
         </div>
     );

@@ -3,3 +3,7 @@ uvicorn
 python-multipart
 Pillow
 pydantic
+SQLAlchemy>=2.0,<3.0
+alembic>=1.13,<2.0
+PyJWT>=2.8,<3.0
+argon2-cffi>=23.1,<26.0

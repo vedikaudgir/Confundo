@@ -17,5 +17,6 @@ client/node_modules/
 client/dist/
 
 server/output/
+server/private/
 server/static/uploads/
 mockchat.db
