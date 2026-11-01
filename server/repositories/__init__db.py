@@ -1,56 +1,20 @@
-import sqlite3
+from sqlalchemy import inspect, text
 
-DB = "mockchat.db"
+from server.database import engine
+
+
+EXPECTED_REVISION = "20261101_0001"
+
 
 def init_db():
-    conn = sqlite3.connect(DB)
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS chats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            platform TEXT,
-            title TEXT,
-            subtitle TEXT,
-            theme TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    inspector = inspect(engine)
+    if "alembic_version" not in inspector.get_table_names():
+        raise RuntimeError(
+            "Database migrations have not been applied. Run `alembic upgrade head` before starting the API."
         )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS participants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER,
-            name TEXT,
-            role TEXT,
-            avatar_path TEXT
+    with engine.connect() as connection:
+        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+    if revision != EXPECTED_REVISION:
+        raise RuntimeError(
+            f"Database revision {revision!r} is not current. Run `alembic upgrade head` before starting the API."
         )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER,
-            sender_id INTEGER,
-            type TEXT,
-            content TEXT,
-            timestamp TEXT,
-            direction TEXT,
-            reply_to INTEGER,
-            meta TEXT
-        )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        email TEXT UNIQUE,
-        password_hash TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-""")
-    conn.commit()
-    conn.close()
-
-

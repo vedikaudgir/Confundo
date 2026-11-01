@@ -1,146 +1,93 @@
+import hmac
 import os
-from pathlib import Path
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from server.schemas.chat_schema import CreateChatRequest
-from server.schemas.message_schema import AddMessageRequest
-
-from server.services.chat_service import (
-    create_chat_workflow,
-    add_message_workflow,
-    get_chat_state,
-    generate_preview,
-    update_chat_workflow
+from server.config import (
+    ACCESS_COOKIE,
+    COOKIE_SAMESITE,
+    COOKIE_SECURE,
+    CSRF_COOKIE,
+    JWT_SECRET_KEY,
+    REFRESH_COOKIE,
 )
-
 from server.repositories.__init__db import init_db
-from server.repositories.participant_repository import update_avatar
-
-
-app = FastAPI(title="Chat Meme Generator")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://chat-meme-generator.vercel.app"],  # 👈 IMPORTANT
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SERVER_DIR = REPO_ROOT / "server"
-UPLOADS_DIR = SERVER_DIR / "static" / "uploads"
-
-
-def _parse_cors_origins() -> tuple[list[str], bool]:
-    raw = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
-    raw_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "").strip().lower()
-    credentials_override = None
-    if raw_credentials in {"true", "1", "yes", "y"}:
-        credentials_override = True
-    elif raw_credentials in {"false", "0", "no", "n"}:
-        credentials_override = False
-
-    if not raw:
-        # Safe default for deployments: allow any origin but disable credentials.
-        # If you need credentialed requests, set CORS_ALLOW_ORIGINS explicitly.
-        allow_credentials = False if credentials_override is None else credentials_override
-        return ["*"], allow_credentials
-
-    origins = [o.strip() for o in raw.split(",") if o.strip()]
-    if any(o == "*" for o in origins):
-        allow_credentials = False if credentials_override is None else credentials_override
-        # Credentials must be false when allow_origins is "*"
-        return ["*"], False if allow_credentials else False
-
-    allow_credentials = True if credentials_override is None else credentials_override
-    return origins, allow_credentials
-
-
-cors_origins, cors_allow_credentials = _parse_cors_origins()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=cors_allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from server.routers import (
+    auth,
+    chats,
+    examples,
+    history,
+    messages,
+    participants,
+    settings,
+    users,
 )
 
 
-@app.options("/{path:path}")
-def options_passthrough(path: str):
-    # Some proxies/clients send OPTIONS without typical CORS preflight headers.
-    # Returning 204 avoids noisy 400s while CORS middleware still sets headers
-    # when it detects a real preflight request.
-    return {}
+def _cors_origins():
+    raw = os.getenv(
+        "CORS_ALLOW_ORIGINS",
+        "http://localhost:5173",
+    )
+    origins = [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+    if not origins or "*" in origins:
+        raise ValueError("CORS_ALLOW_ORIGINS must contain explicit browser origins")
+    return origins
 
 
-@app.on_event("startup")
-def startup():
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if len(JWT_SECRET_KEY.encode("utf-8")) < 32:
+        raise RuntimeError("JWT_SECRET_KEY must contain at least 32 bytes")
+    if COOKIE_SAMESITE == "none" and not COOKIE_SECURE:
+        raise RuntimeError("COOKIE_SECURE must be true when COOKIE_SAMESITE is none")
     init_db()
+    yield
 
 
-@app.post("/chats")
-def create_chat(data: CreateChatRequest):
-    return create_chat_workflow(
-        data.platform,
-        data.title,
-        data.subtitle,
-        data.theme
-    )
+app = FastAPI(title="ChattieBaby", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-CSRF-Token", "Authorization"],
+)
 
 
-@app.post("/chats/{chat_id}/messages")
-def add_message(chat_id: int, msg: AddMessageRequest):
-    return add_message_workflow(
-        chat_id,
-        msg.sender_id,
-        msg.type,
-        msg.content,
-        msg.timestamp,
-        msg.direction,
-        msg.reply_to,
-        msg.meta
-    )
+@app.middleware("http")
+async def protect_cookie_authenticated_writes(request: Request, call_next):
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        has_cookie_session = bool(
+            request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
+        )
+        has_bearer = request.headers.get("authorization", "").lower().startswith("bearer ")
+        if has_cookie_session and not has_bearer:
+            csrf_cookie = request.cookies.get(CSRF_COOKIE, "")
+            csrf_header = request.headers.get("x-csrf-token", "")
+            allowed_origins = _cors_origins()
+            origin = request.headers.get("origin")
+            if (
+                not csrf_cookie
+                or not csrf_header
+                or not hmac.compare_digest(csrf_cookie, csrf_header)
+                or (origin is not None and origin.rstrip("/") not in allowed_origins)
+            ):
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
+    return await call_next(request)
 
 
-@app.patch("/chats/{chat_id}")
-def update_chat(chat_id: int, data: CreateChatRequest):
-    return update_chat_workflow(
-        chat_id,
-        data.platform,
-        data.title,
-        data.subtitle,
-        data.theme
-    )
-
-
-@app.get("/chats/{chat_id}")
-def get_chat(chat_id: int):
-    path = generate_preview(chat_id)
-    return FileResponse(Path(path), media_type="image/png")
-
-
-@app.get("/chats/{chat_id}/preview")
-def preview(chat_id: int):
-    path = generate_preview(chat_id)
-    return FileResponse(Path(path), media_type="image/png")
-
-
-@app.post("/participants/{participant_id}/avatar")
-def upload_avatar(participant_id: int, file: UploadFile = File(...)):
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Avatar must be an image")
-
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    path = (UPLOADS_DIR / f"{participant_id}.png").resolve()
-
-    with open(path, "wb") as f:
-        f.write(file.file.read())
-
-    update_avatar(participant_id, str(path))
-
-    return {"avatar": str(path)}
+for router in (
+    auth.router,
+    users.router,
+    settings.router,
+    chats.router,
+    participants.router,
+    messages.router,
+    history.router,
+    examples.router,
+):
+    app.include_router(router)
