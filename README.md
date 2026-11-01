@@ -1,105 +1,125 @@
-# ChattieBaby
+# Chat Meme Generator
 
-ChattieBaby creates fictional chat screenshots. The React/Vite client calls a FastAPI API; platform-specific Pillow renderers generate PNGs. SQLite stores accounts, settings, chats, messages, participants, refresh sessions, and generation history.
+Chat Meme Generator is a full-stack web application that generates platform-style chat screenshots from structured message data. It implements a custom rendering engine to simulate real messaging interfaces such as WhatsApp and ChatGPT with accurate layout, typography, and visual structure.
 
-## Local setup and database reset (PowerShell)
+---
 
-From the repository root (`E:\chatMemeGenerator`), install dependencies once:
+## Overview
 
-```powershell
-.\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-npm --prefix client install
+The application allows users to create chats, add messages, customize participants, and generate realistic chat previews as images. The system is designed with a modular backend architecture and a rendering pipeline that converts chat data into platform-specific UI representations.
+
+---
+
+## Features
+
+- Dynamic chat creation and message management  
+- Platform-specific rendering (WhatsApp-style, ChatGPT-style, Instagram DM(yet to come))  
+- Custom layout engine with text wrapping, alignment, and spacing logic  
+- Avatar upload and participant handling  
+- Image generation using server-side rendering  
+- Real-time preview updates  
+- Deployed frontend and backend with production configuration  
+
+---
+
+## Architecture
+
+The backend follows a layered design:
+
+- Schemas: Data validation and request/response models  
+- Services: Core business logic and rendering workflows  
+- Repositories: Data access and persistence  
+- Rendering Layer: Converts structured chat data into images using PIL  
+
+Frontend communicates with the backend via REST APIs.
+
+---
+
+## Tech Stack
+
+### Frontend
+- React  
+- Vite
+- Tailwind 3
+- Vercel  
+
+### Backend
+- FastAPI  
+- Python  
+- Pillow (PIL) for Image Generation.
+
+### Infrastructure
+- Docker  
+- Railway  
+- REST API  
+
+---
+
+## Rendering Engine
+
+The core of the application is a custom-built rendering engine that:
+
+- Calculates dynamic bubble sizes based on text length  
+- Handles multi-line text wrapping and alignment  
+- Positions timestamps intelligently  
+- Simulates platform-specific UI elements (headers, icons, input bars)  
+- Supports extensibility for additional chat platforms  
+
+---
+
+## API Endpoints
+
+POST /chats  
+PATCH /chats/{chat_id}  
+POST /chats/{chat_id}/messages  
+GET /chats/{chat_id}/preview  
+POST /participants/{participant_id}/avatar  
+
+---
+
+## Setup
+
+### Backend
+
+```bash
+cd server
+pip install -r requirements.txt
+uvicorn utils.main:app --reload
 ```
 
-The explicit reset command permanently deletes only the repository-local ChattieBaby `mockchat.db`, its SQLite sidecars, app-private generated images/avatars, uploaded avatars, and renderer PNG outputs:
+### Frontend
 
-```powershell
-Set-Location E:\chatMemeGenerator
-Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
-Remove-Item Env:PRIVATE_STORAGE_DIR -ErrorAction SilentlyContinue
-.\venv\Scripts\python.exe -m server.reset_database --yes
-.\venv\Scripts\python.exe -m alembic -c alembic.ini upgrade head
+```bash
+cd client
+npm install
+npm run dev
 ```
 
-The reset tool is intentionally restricted: it requires the project root and `--yes`, refuses configured database/storage overrides, verifies the target is a healthy SQLite file containing ChattieBaby chat tables, and refuses symlinks or paths outside this repository. It does not connect to, drop, or modify any remote or unrelated database. Reset is never run automatically at application startup. For a deployed environment, provision a new empty database dedicated to ChattieBaby and run Alembic against that explicit deployment URL; do not point the local reset tool at it.
+---
 
-The default database URL is `sqlite:///./mockchat.db`, resolved from the repository root. The fresh initial migration creates the schema; it does not transform legacy tables.
+## Deployment
 
-### Start the API
+- Frontend deployed on Vercel  
+- Backend containerized with Docker and deployed on Railway
+- <a>https://chat-meme-generator.vercel.app/</a>
 
-In a PowerShell terminal at the repository root:
+---
 
-```powershell
-Set-Location E:\chatMemeGenerator
-$env:APP_ENV = "development"
-$env:DATABASE_URL = "sqlite:///./mockchat.db"
-$env:JWT_SECRET_KEY = "local-development-secret-change-this-to-a-random-32-byte-value"
-$env:CORS_ALLOW_ORIGINS = "http://localhost:5173"
-$env:COOKIE_SECURE = "false"
-$env:COOKIE_SAMESITE = "lax"
-Remove-Item Env:COOKIE_DOMAIN -ErrorAction SilentlyContinue
-.\venv\Scripts\python.exe -m alembic -c alembic.ini upgrade head
-.\venv\Scripts\python.exe -m uvicorn server.main:app --reload --host 127.0.0.1 --port 8000
-```
+## Working Model
 
-### Start the frontend
+<img width="1920" height="1080" alt="{4461B342-2A0E-40F5-AF0B-A3DC76D965E1}" src="https://github.com/user-attachments/assets/0317059e-8ba2-4ff9-8745-0084949d6c2c" />
 
-In a second PowerShell terminal:
 
-```powershell
-Set-Location E:\chatMemeGenerator
-npm --prefix client run dev -- --host localhost
-```
+## Future Improvements
 
-Open `http://localhost:5173`. `client/.env.development.local` points the development frontend at `http://localhost:8000`. Keep the hostname identical (`localhost`) on both sides: browser cookies are host-scoped, while `localhost` and `127.0.0.1` are different cookie hosts and different sites for `SameSite` checks. Ports make the frontend/API cross-origin, so the API allows the exact frontend origin with credentialed CORS. `SameSite=Lax` remains enabled, `Secure` is disabled only for local HTTP development, the cookie domain is host-only, and the CSRF cookie/header check stays enabled. Restart Vite after changing its environment files.
+- Additional platform renderers (Instagram, iMessage)  
+- Markdown and rich-text support  
+- CDN-based image delivery  
+- Background processing for rendering  
+- Authentication system  
 
-## API areas
+---
 
-| Router | Main routes |
-|---|---|
-| `auth` | `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`; `GET /auth/me` |
-| `users` | `GET/PATCH/DELETE /users/me`; `PATCH /users/me/password` |
-| `settings` | `GET/PATCH /settings/me` |
-| `chats` | `GET/POST /chats`; `GET/PATCH/DELETE /chats/{id}`; `GET /chats/{id}/data` and `/preview`; `POST /chats/{id}/generate` |
-| `participants` | List/create by chat, update/delete by participant, upload/read private avatar |
-| `messages` | List/create by chat; update/delete by message |
-| `history` | List/delete history entries and read private generated images |
-| `examples` | List fictional examples and read their public PNGs |
+## Author
 
-All private chat, participant, message, avatar, history, and generated-image access is scoped to the authenticated user. Request and response schemas are defined with Pydantic.
-Preview requests do not create history entries; each explicit `POST /chats/{id}/generate` creates a separately downloadable, owner-private history record.
-
-## Database schema
-
-- `users`: username, email, password hash, creation time.
-- `user_settings`: per-user theme and JSON preferences.
-- `chats`: platform and conversation metadata; every chat has a required owner.
-- `participants`: chat-owned names, roles, and private avatar paths.
-- `messages`: chat-owned text, type, timestamp, ordering, direction, required participant sender, optional reply, and metadata.
-- `generation_history`: user/chat association and private output path.
-- `refresh_sessions`: user association, hashed refresh token, expiry, and revocation time.
-
-The ORM relationships use foreign keys, ownership constraints, indexes, and delete cascades. The initial Alembic migration creates all seven tables and checks SQLite foreign-key consistency. Because this is a fresh schema, existing databases must be reset or replaced with a new empty database before upgrading.
-
-## Configuration and deployment
-
-Required in production:
-
-- `JWT_SECRET_KEY`: stable secret of at least 32 bytes.
-- `CORS_ALLOW_ORIGINS`: comma-separated explicit frontend origins (wildcard origins are rejected).
-- `DATABASE_URL`: persistent database URL; the default is a working-directory-relative SQLite file.
-- `PRIVATE_STORAGE_DIR`: persistent, non-public storage for generated images and avatars.
-- `COOKIE_SECURE=true` behind HTTPS. For cross-site frontend/API hosting, configure `COOKIE_SAMESITE=none`, `COOKIE_SECURE=true`, and an appropriate `COOKIE_DOMAIN`; browser third-party-cookie policies may still block such deployments.
-
-`COOKIE_SECURE` defaults to `true` when `APP_ENV=production` (and `false` for development). Production HTTPS deployments must not set it to `false`. The frontend and API should be same-site where possible; cross-site deployments can also be affected by third-party-cookie restrictions.
-
-Docker applies `alembic upgrade head` before starting Uvicorn. Point deployment at a new, empty, ChattieBaby-dedicated database for the first deployment of this schema. Email-based password reset is not implemented; signed-in users can change their password from account settings.
-
-## Verification
-
-```powershell
-.\venv\Scripts\python.exe -m pytest -q
-npm --prefix client run build
-npm --prefix client run lint
-git diff --check
-```
+Vedika Udgir
