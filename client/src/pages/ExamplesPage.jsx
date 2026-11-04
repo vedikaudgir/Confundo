@@ -39,7 +39,7 @@ export function ExamplesPage() {
             const downloadUrl = URL.createObjectURL(await response.blob());
             const link = document.createElement("a");
             link.href = downloadUrl;
-            link.download = `chattiebaby-${selected.slug}.png`;
+            link.download = `confundo-${selected.slug}.png`;
             document.body.appendChild(link);
             link.click();
             link.remove();

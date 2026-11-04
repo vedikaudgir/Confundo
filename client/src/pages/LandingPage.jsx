@@ -202,7 +202,7 @@ export function LandingPage() {
             <section className="gallery-section" aria-labelledby="gallery-heading">
                 <div className="section-heading">
                     <div>
-                        <span className="eyebrow">Made with ChattieBaby</span>
+                        <span className="eyebrow">Made with Confundo</span>
                         <h2 id="gallery-heading">A few fictional conversations.</h2>
                     </div>
                     <Link className="text-link" to="/examples">

@@ -141,7 +141,7 @@ export function AccountPage() {
             const url = URL.createObjectURL(await response.blob());
             const anchor = document.createElement("a");
             anchor.href = url;
-            anchor.download = `chattiebaby-${item.platform}-${item.chat_id}.png`;
+            anchor.download = `confundo-${item.platform}-${item.chat_id}.png`;
             document.body.appendChild(anchor);
             anchor.click();
             anchor.remove();
