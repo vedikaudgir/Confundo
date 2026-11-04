@@ -1,24 +1,53 @@
+const viteEnv = import.meta.env || {};
+
 export const API_BASE_URL = (
-    import.meta.env.VITE_API_BASE_URL ||
-    (import.meta.env.DEV
+    viteEnv.VITE_API_BASE_URL ||
+    (viteEnv.DEV
         ? "http://localhost:8000"
-        : "https://chatmemegenerator-production.up.railway.app")
+        : "/api")
 ).replace(/\/+$/, "");
 
 const PUBLIC_PATHS = ["/examples"];
 const AUTH_NO_REFRESH = ["/auth/login", "/auth/register", "/auth/logout", "/auth/refresh"];
+const SESSION_ESTABLISHING_PATHS = ["/auth/login", "/auth/register", "/auth/refresh"];
 let refreshInFlight = null;
+let csrfBootstrapInFlight = null;
+let csrfTokenValue = "";
+let sessionCookieHint = false;
 
 function csrfToken() {
-    if (typeof document === "undefined") return "";
-    const cookie = document.cookie
-        .split("; ")
-        .find((item) => item.startsWith("chattiebaby_csrf="));
-    return cookie ? decodeURIComponent(cookie.slice("chattiebaby_csrf=".length)) : "";
+    return csrfTokenValue;
 }
 
 function hasSessionHint() {
-    return Boolean(csrfToken());
+    return sessionCookieHint;
+}
+
+function updateCsrfToken(response) {
+    const token = response.headers.get("X-CSRF-Token");
+    if (token) csrfTokenValue = token;
+}
+
+async function ensureCsrfToken() {
+    if (csrfTokenValue) return;
+    if (!csrfBootstrapInFlight) {
+        csrfBootstrapInFlight = fetch(`${API_BASE_URL}/auth/csrf`, {
+            credentials: "include",
+        }).then(async (response) => {
+            if (!response.ok) {
+                throw new Error(`Could not initialize request protection (${response.status})`);
+            }
+            updateCsrfToken(response);
+            if (!csrfTokenValue) {
+                throw new Error("The API did not provide a CSRF token");
+            }
+            const body = await response.json();
+            sessionCookieHint = Boolean(body.has_session);
+        }).finally(() => {
+            csrfBootstrapInFlight = null;
+        });
+    }
+    await csrfBootstrapInFlight;
 }
 
 function expireFrontendSession() {
@@ -56,19 +85,33 @@ async function refreshSession() {
     }
     const response = await refreshInFlight;
     if (!response.ok) {
+        if (response.status === 401) {
+            csrfTokenValue = "";
+            sessionCookieHint = false;
+        }
         expireFrontendSession();
         return false;
     }
+    updateCsrfToken(response);
+    sessionCookieHint = true;
     return true;
 }
 
 async function request(path, options = {}, canRefresh = true) {
+    const method = (options.method || "GET").toUpperCase();
+    if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        await ensureCsrfToken();
+    }
     const mayRefresh = hasSessionHint();
     const response = await fetch(`${API_BASE_URL}${path}`, {
         ...options,
         credentials: "include",
         headers: requestHeaders(options),
     });
+    updateCsrfToken(response);
+    if (response.ok && SESSION_ESTABLISHING_PATHS.includes(path)) {
+        sessionCookieHint = true;
+    }
 
     if (
         response.status === 401 &&
@@ -106,9 +149,18 @@ const jsonRequest = (method, body) => ({
 
 export const chatApi = {
     hasSessionCookieHint: hasSessionHint,
+    getCsrfToken: async () => {
+        await ensureCsrfToken();
+        return csrfTokenValue;
+    },
     register: (data) => request("/auth/register", jsonRequest("POST", data), false),
     login: (data) => request("/auth/login", jsonRequest("POST", data), false),
-    logout: () => request("/auth/logout", { method: "POST" }, false),
+    logout: async () => {
+        const result = await request("/auth/logout", { method: "POST" }, false);
+        csrfTokenValue = "";
+        sessionCookieHint = false;
+        return result;
+    },
     getMe: () => request("/auth/me"),
     updateProfile: (data) => request("/users/me", jsonRequest("PATCH", data)),
     changePassword: (data) => request("/users/me/password", jsonRequest("PATCH", data)),

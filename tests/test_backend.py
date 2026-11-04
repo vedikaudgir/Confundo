@@ -143,12 +143,20 @@ def test_auth_registration_login_rotation_logout_and_csrf(client):
         "/auth/register",
         headers={
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "content-type",
+            "Access-Control-Request-Headers": "content-type,x-csrf-token",
         },
     )
     assert preflight.status_code == 200
     assert preflight.headers["access-control-allow-origin"] == "http://localhost:5173"
     assert preflight.headers["access-control-allow-credentials"] == "true"
+    assert "x-csrf-token" in preflight.headers["access-control-allow-headers"].lower()
+
+    bootstrap = client.get("/auth/csrf")
+    assert bootstrap.status_code == 200
+    assert bootstrap.json() == {"has_session": False}
+    assert bootstrap.headers["X-CSRF-Token"] == client.cookies.get("chattiebaby_csrf")
+    assert bootstrap.headers["Cache-Control"] == "no-store"
+    assert bootstrap.headers["access-control-expose-headers"] == "X-CSRF-Token"
 
     response = client.post("/auth/register", json=payload)
     assert response.status_code == 201
@@ -176,13 +184,20 @@ def test_auth_registration_login_rotation_logout_and_csrf(client):
     assert client.cookies.get("chattiebaby_access")
     assert client.cookies.get("chattiebaby_refresh")
     assert client.cookies.get("chattiebaby_csrf")
+    assert response.headers["X-CSRF-Token"] == client.cookies.get("chattiebaby_csrf")
+    restored_bootstrap = client.get("/auth/csrf")
+    assert restored_bootstrap.json() == {"has_session": True}
+    assert restored_bootstrap.headers["X-CSRF-Token"] == response.headers["X-CSRF-Token"]
     assert client.get("/auth/me").status_code == 200
     assert client.get("/settings/me").status_code == 200
     created = create_chat(client, "whatsapp")
     assert client.get("/chats").json()[0]["id"] == created["chat_id"]
 
     csrf = client.cookies.get("chattiebaby_csrf")
-    assert client.post("/settings/me", json={"theme": "dark"}).status_code == 403
+    csrf_error = client.post("/settings/me", json={"theme": "dark"})
+    assert csrf_error.status_code == 403
+    assert csrf_error.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert csrf_error.headers["access-control-allow-credentials"] == "true"
     assert client.post(
         "/settings/me",
         json={"theme": "dark"},
@@ -194,10 +209,13 @@ def test_auth_registration_login_rotation_logout_and_csrf(client):
     ).status_code == 403
 
     old_refresh = client.cookies.get("chattiebaby_refresh")
+    old_csrf = client.cookies.get("chattiebaby_csrf")
     rotated = mutate(client, "POST", "/auth/refresh")
     assert rotated.status_code == 200, rotated.text
     new_refresh = client.cookies.get("chattiebaby_refresh")
     assert old_refresh and new_refresh and old_refresh != new_refresh
+    assert client.cookies.get("chattiebaby_csrf") != old_csrf
+    assert rotated.headers["X-CSRF-Token"] == client.cookies.get("chattiebaby_csrf")
 
     assert client.get("/auth/me").status_code == 200
     assert client.get("/settings/me").status_code == 200
@@ -210,13 +228,24 @@ def test_auth_registration_login_rotation_logout_and_csrf(client):
         base_url="http://localhost:8000",
         headers={"Origin": "http://localhost:5173"},
     )
-    old_session.cookies.set("chattiebaby_refresh", old_refresh)
-    old_session.cookies.set("chattiebaby_csrf", client.cookies.get("chattiebaby_csrf"))
+    old_session.cookies.set("chattiebaby_refresh", old_refresh, domain="localhost.local", path="/")
+    old_session.cookies.set(
+        "chattiebaby_csrf",
+        client.cookies.get("chattiebaby_csrf"),
+        domain="localhost.local",
+        path="/",
+    )
     replay = old_session.post(
         "/auth/refresh",
         headers={"X-CSRF-Token": old_session.cookies.get("chattiebaby_csrf")},
     )
     assert replay.status_code == 401
+    cleared_cookies = replay.headers.get_list("set-cookie")
+    for name in ("chattiebaby_access", "chattiebaby_refresh", "chattiebaby_csrf"):
+        assert "Max-Age=0" in next(
+            header for header in cleared_cookies if header.startswith(f"{name}=")
+        )
+    assert old_session.cookies.get("chattiebaby_refresh") is None
     old_session.close()
 
     assert mutate(client, "POST", "/auth/logout").status_code == 200
@@ -248,12 +277,15 @@ def test_auth_registration_login_rotation_logout_and_csrf(client):
     assert len(login.headers.get_list("set-cookie")) == 3
     assert client.get("/auth/me").status_code == 200
     assert login.json()["username"] == username.lower()
-    assert mutate(
+    failed_login = mutate(
         client,
         "POST",
         "/auth/login",
         json={"identifier": username, "password": "not the password"},
-    ).status_code == 401
+    )
+    assert failed_login.status_code == 401
+    assert failed_login.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert failed_login.headers["access-control-allow-credentials"] == "true"
 
 
 def test_unauthenticated_account_requests_return_401():
@@ -269,12 +301,15 @@ def test_unauthenticated_account_requests_return_401():
 def test_production_cookies_are_secure_by_default():
     env = os.environ.copy()
     env.pop("COOKIE_SECURE", None)
+    env.pop("COOKIE_SAMESITE", None)
+    env.pop("COOKIE_DOMAIN", None)
     env["APP_ENV"] = "production"
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "from server.config import COOKIE_SECURE; assert COOKIE_SECURE",
+            "from server.config import COOKIE_DOMAIN, COOKIE_SAMESITE, COOKIE_SECURE; "
+            "assert COOKIE_SECURE and COOKIE_SAMESITE == 'none' and COOKIE_DOMAIN is None",
         ],
         cwd=ROOT,
         env=env,
@@ -381,6 +416,32 @@ def test_jwt_secret_validation(app_env, secret, message, tmp_path):
 
     assert result.returncode != 0
     assert message in result.stderr
+
+
+def test_production_cors_default_matches_deployed_frontend(tmp_path):
+    env = os.environ.copy()
+    env["APP_ENV"] = "production"
+    env["COOKIE_SECURE"] = "true"
+    env["JWT_SECRET_KEY"] = "tests-only-secret-key-with-at-least-32-bytes"
+    env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'app.db'}"
+    env["PRIVATE_STORAGE_DIR"] = str(tmp_path / "private")
+    env.pop("CORS_ALLOW_ORIGINS", None)
+    env.pop("COOKIE_SAMESITE", None)
+    env.pop("COOKIE_DOMAIN", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from server.main import _cors_origins; "
+            "assert _cors_origins() == ['https://confundo.vercel.app']",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_profile_settings_password_and_account_deletion(client):
