@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from server.config import (
     ACCESS_COOKIE,
+    APP_ENV,
     COOKIE_SAMESITE,
     COOKIE_SECURE,
     CSRF_COOKIE,
@@ -30,7 +31,9 @@ from server.routers import (
 def _cors_origins():
     raw = os.getenv(
         "CORS_ALLOW_ORIGINS",
-        "http://localhost:5173",
+        "https://chat-meme-generator.vercel.app"
+        if APP_ENV in {"production", "prod"}
+        else "http://localhost:5173",
     )
     origins = [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
     if not origins or "*" in origins:
