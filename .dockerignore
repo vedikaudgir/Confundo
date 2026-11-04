@@ -12,6 +12,10 @@ env/
 
 .git/
 .vscode/
+.secrets/
+.env
+.env.*
+!.env.example
 
 client/node_modules/
 client/dist/
@@ -19,4 +23,6 @@ client/dist/
 server/output/
 server/private/
 server/static/uploads/
-mockchat.db
+*.db
+*.sqlite
+*.sqlite3

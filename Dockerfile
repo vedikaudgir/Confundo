@@ -11,6 +11,6 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY alembic.ini /app/alembic.ini
 COPY server /app/server
 
-EXPOSE 8000
+EXPOSE 10000
 
-CMD ["sh", "-c", "alembic -c /app/alembic.ini upgrade head && python -m uvicorn server.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "alembic -c /app/alembic.ini upgrade head && exec python -m uvicorn server.main:app --host 0.0.0.0 --port \"${PORT:-10000}\""]
