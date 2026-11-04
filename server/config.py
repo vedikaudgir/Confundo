@@ -3,12 +3,16 @@ import secrets
 import time
 from pathlib import Path
 
+from sqlalchemy.engine import make_url
+
 
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV in {"production", "prod"}
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "sqlite:////var/data/mockchat.db" if IS_PRODUCTION else "sqlite:///./mockchat.db",
+    "sqlite:////tmp/confundo/mockchat.db"
+    if IS_PRODUCTION
+    else "sqlite:///./mockchat.db",
 )
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 JWT_SECRET_FILE = Path(
@@ -104,8 +108,21 @@ MAX_AVATAR_PIXELS = 4_000_000
 PRIVATE_STORAGE_DIR = Path(
     os.getenv(
         "PRIVATE_STORAGE_DIR",
-        "/var/data/private"
+        "/tmp/confundo/private"
         if IS_PRODUCTION
         else str(Path(__file__).resolve().parent / "private"),
     )
 ).resolve()
+
+_database_url = make_url(DATABASE_URL)
+if _database_url.get_backend_name() == "sqlite":
+    _database_path = _database_url.database
+    if (
+        _database_path
+        and _database_path != ":memory:"
+        and not _database_path.startswith("file:")
+    ):
+        Path(_database_path).expanduser().resolve().parent.mkdir(
+            parents=True, exist_ok=True
+        )
+PRIVATE_STORAGE_DIR.mkdir(parents=True, exist_ok=True)

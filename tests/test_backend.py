@@ -298,6 +298,91 @@ def test_production_cookies_are_secure_by_default():
     assert rejected.returncode != 0
 
 
+def test_development_jwt_secret_is_generated_and_reused(tmp_path):
+    secret_file = tmp_path / ".secrets" / "jwt_secret"
+    env = os.environ.copy()
+    env.pop("JWT_SECRET_KEY", None)
+    env["APP_ENV"] = "development"
+    env["JWT_SECRET_FILE"] = str(secret_file)
+    script = "from server.config import JWT_SECRET_KEY; print(JWT_SECRET_KEY)"
+
+    first = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    second = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert first.stdout.strip() == second.stdout.strip()
+    assert len(first.stdout.strip().encode("utf-8")) >= 32
+    assert secret_file.read_text(encoding="utf-8") == first.stdout.strip()
+    if os.name != "nt":
+        assert secret_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_explicit_jwt_secret_takes_precedence(tmp_path):
+    secret_file = tmp_path / ".secrets" / "jwt_secret"
+    secret_file.parent.mkdir()
+    secret_file.write_text("persisted-secret-with-at-least-32-bytes", encoding="utf-8")
+    env = os.environ.copy()
+    env["APP_ENV"] = "development"
+    env["JWT_SECRET_FILE"] = str(secret_file)
+    env["JWT_SECRET_KEY"] = "explicit-secret-with-at-least-32-bytes"
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from server.config import JWT_SECRET_KEY; print(JWT_SECRET_KEY)"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == env["JWT_SECRET_KEY"]
+    assert secret_file.read_text(encoding="utf-8") == "persisted-secret-with-at-least-32-bytes"
+
+
+@pytest.mark.parametrize(
+    ("app_env", "secret", "message"),
+    [
+        ("development", "too-short", "JWT_SECRET_KEY must contain at least 32 bytes"),
+        ("production", None, "JWT_SECRET_KEY must be explicitly configured in production"),
+        ("production", "too-short", "JWT_SECRET_KEY must contain at least 32 bytes"),
+    ],
+)
+def test_jwt_secret_validation(app_env, secret, message, tmp_path):
+    env = os.environ.copy()
+    env["APP_ENV"] = app_env
+    env["JWT_SECRET_FILE"] = str(tmp_path / "jwt_secret")
+    if app_env in {"production", "prod"}:
+        env["COOKIE_SECURE"] = "true"
+    if secret is None:
+        env.pop("JWT_SECRET_KEY", None)
+    else:
+        env["JWT_SECRET_KEY"] = secret
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from server.config import JWT_SECRET_KEY"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
 def test_profile_settings_password_and_account_deletion(client):
     user = register(client, "profile")
     response = mutate(

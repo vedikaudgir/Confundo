@@ -6,6 +6,8 @@ __pycache__/
 
 *.db
 
+.secrets/
+
 server/output/
 server/private/
 
