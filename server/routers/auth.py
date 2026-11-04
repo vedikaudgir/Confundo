@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -11,6 +12,7 @@ from server.config import (
     COOKIE_SAMESITE,
     COOKIE_SECURE,
     REFRESH_COOKIE,
+    REFRESH_TOKEN_DAYS,
 )
 from server.database import session_scope
 from server.models import RefreshSession, User, UserSettings
@@ -34,6 +36,7 @@ def _set_session_cookies(response: Response, user_id: int, refresh_token: str, e
     access_token = create_access_token(user_id)
     access_max_age = ACCESS_TOKEN_MINUTES * 60
     refresh_max_age = max(1, int((expires_at - utc_now()).total_seconds()))
+    csrf_token = create_csrf_token()
     cookie_options = {
         "secure": COOKIE_SECURE,
         "samesite": COOKIE_SAMESITE,
@@ -48,8 +51,15 @@ def _set_session_cookies(response: Response, user_id: int, refresh_token: str, e
         REFRESH_COOKIE, refresh_token, httponly=True, max_age=refresh_max_age, **cookie_options
     )
     response.set_cookie(
-        CSRF_COOKIE, create_csrf_token(), httponly=False, max_age=refresh_max_age, **cookie_options
+        CSRF_COOKIE, csrf_token, httponly=False, max_age=refresh_max_age, **cookie_options
     )
+    response.headers["X-CSRF-Token"] = csrf_token
+
+
+def _unauthorized_refresh(detail: str) -> JSONResponse:
+    response = JSONResponse(status_code=401, content={"detail": detail})
+    _clear_session_cookies(response)
+    return response
 
 
 def _clear_session_cookies(response: Response):
@@ -62,6 +72,34 @@ def _clear_session_cookies(response: Response):
             samesite=COOKIE_SAMESITE,
             domain=COOKIE_DOMAIN,
         )
+
+
+@router.get("/csrf")
+def csrf_bootstrap(request: Request, response: Response):
+    csrf_token = request.cookies.get(CSRF_COOKIE)
+    if not csrf_token:
+        csrf_token = create_csrf_token()
+        cookie_options = {
+            "secure": COOKIE_SECURE,
+            "samesite": COOKIE_SAMESITE,
+            "path": "/",
+        }
+        if COOKIE_DOMAIN:
+            cookie_options["domain"] = COOKIE_DOMAIN
+        response.set_cookie(
+            CSRF_COOKIE,
+            csrf_token,
+            httponly=False,
+            max_age=REFRESH_TOKEN_DAYS * 24 * 60 * 60,
+            **cookie_options,
+        )
+    response.headers["X-CSRF-Token"] = csrf_token
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "has_session": bool(
+            request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
+        )
+    }
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
@@ -113,8 +151,7 @@ def login(data: LoginRequest, response: Response):
 def refresh(request: Request, response: Response):
     raw_token = request.cookies.get(REFRESH_COOKIE)
     if not raw_token:
-        _clear_session_cookies(response)
-        raise HTTPException(status_code=401, detail="Refresh session is missing")
+        return _unauthorized_refresh("Refresh session is missing")
 
     token_hash = hash_refresh_token(raw_token)
     with session_scope() as session:
@@ -122,8 +159,10 @@ def refresh(request: Request, response: Response):
             select(RefreshSession).where(RefreshSession.token_hash == token_hash)
         )
         if current is None or current.revoked_at is not None or is_expired(current.expires_at):
-            _clear_session_cookies(response)
-            raise HTTPException(status_code=401, detail="Refresh session is invalid or expired")
+            return _unauthorized_refresh("Refresh session is invalid or expired")
+        user = session.scalar(select(User).where(User.id == current.user_id))
+        if user is None:
+            return _unauthorized_refresh("Account no longer exists")
         now = utc_now()
         result = session.execute(
             update(RefreshSession)
@@ -131,8 +170,7 @@ def refresh(request: Request, response: Response):
             .values(revoked_at=now)
         )
         if result.rowcount != 1:
-            _clear_session_cookies(response)
-            raise HTTPException(status_code=401, detail="Refresh session has already been used")
+            return _unauthorized_refresh("Refresh session has already been used")
         token, replacement_hash, expires_at = create_refresh_token()
         session.add(
             RefreshSession(
@@ -141,10 +179,6 @@ def refresh(request: Request, response: Response):
                 expires_at=expires_at,
             )
         )
-        user = session.scalar(select(User).where(User.id == current.user_id))
-        if user is None:
-            _clear_session_cookies(response)
-            raise HTTPException(status_code=401, detail="Account no longer exists")
         user_id = user.id
         user_response = UserResponse.model_validate(user)
     _set_session_cookies(response, user_id, token, expires_at)

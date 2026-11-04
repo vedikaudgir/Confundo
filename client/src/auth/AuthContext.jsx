@@ -4,7 +4,7 @@ import { AuthContext } from "./context";
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
-    const [isLoading, setIsLoading] = useState(() => chatApi.hasSessionCookieHint());
+    const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         let active = true;
@@ -16,12 +16,10 @@ export function AuthProvider({ children }) {
             window.removeEventListener("chattiebaby:session-expired", expireSession);
         };
         window.addEventListener("chattiebaby:session-expired", expireSession);
-        if (!chatApi.hasSessionCookieHint()) {
-            return cleanup;
-        }
-        chatApi.getMe()
+        chatApi.getCsrfToken()
+            .then(() => chatApi.hasSessionCookieHint() ? chatApi.getMe() : null)
             .then((profile) => {
-                if (active) setUser(profile);
+                if (active && profile) setUser(profile);
             })
             .catch((error) => {
                 if (active && error.status !== 401) {

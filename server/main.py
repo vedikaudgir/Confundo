@@ -31,7 +31,7 @@ from server.routers import (
 def _cors_origins():
     raw = os.getenv(
         "CORS_ALLOW_ORIGINS",
-        "https://chat-meme-generator.vercel.app"
+        "https://confundo.vercel.app"
         if APP_ENV in {"production", "prod"}
         else "http://localhost:5173",
     )
@@ -95,4 +95,5 @@ app = CORSMiddleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-CSRF-Token", "Authorization"],
+    expose_headers=["X-CSRF-Token"],
 )
