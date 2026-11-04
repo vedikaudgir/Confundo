@@ -4,10 +4,10 @@ import { ArrowRight } from "lucide-react";
 const pageContent = {
     terms: {
         eyebrow: "Terms & conditions",
-        title: "Using ChattieBaby",
+        title: "Using Confundo",
         intro: "These notes describe the current creative tool and are not a substitute for reviewed legal terms.",
         sections: [
-            ["A fictional chat maker", "ChattieBaby creates mock chat screenshots from information you enter. Do not present fictional screenshots as genuine conversations or use them to impersonate, harass, or mislead someone."],
+            ["A fictional chat maker", "Confundo creates mock chat screenshots from information you enter. Do not present fictional screenshots as genuine conversations or use them to impersonate, harass, or mislead someone."],
             ["Content you provide", "You choose the text, names, and images submitted to the generator. Avoid entering sensitive personal information or images you do not have permission to use."],
             ["Responsible use", "You are responsible for the content you submit and how you use generated images. Do not present fictional screenshots as genuine conversations or use them to impersonate, harass, or mislead someone."],
             ["Review before relying on these terms", "These product notes are informational. The project owner should review and replace them with appropriate legal terms before relying on them as a binding agreement."],
@@ -28,7 +28,7 @@ const pageContent = {
     cookies: {
         eyebrow: "Cookie information",
         title: "Browser storage and cookies",
-        intro: "ChattieBaby uses browser cookies for secure sign-in sessions and a CSRF check.",
+        intro: "Confundo uses browser cookies for secure sign-in sessions and a CSRF check.",
         sections: [
             ["Authentication cookies", "The API sets HttpOnly access and refresh cookies after sign-in. These cookies are used to authenticate requests and maintain the session; JavaScript cannot read them."],
             ["CSRF cookie", "A separate CSRF cookie is readable by the frontend and sent in a request header for state-changing API calls. It is not an authentication token."],
@@ -37,9 +37,9 @@ const pageContent = {
         ],
     },
     about: {
-        eyebrow: "About ChattieBaby",
+        eyebrow: "About Confundo",
         title: "A small tool for made-up conversations.",
-        intro: "ChattieBaby turns a fictional exchange you write into a chat-style image using the project’s Pillow renderers.",
+        intro: "Confundo turns a fictional exchange you write into a chat-style image using the project’s Pillow renderers.",
         sections: [
             ["Supported styles", "The generator offers WhatsApp, Instagram DM, and ChatGPT-style screenshots. The examples gallery is made from fictional sample conversations rendered by the backend."],
             ["Built around your words", "Choose participant names, add messages and timestamps, and preview the result before downloading it. Signed-in users can save chats and review their generated images."],

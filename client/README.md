@@ -1,4 +1,4 @@
-# ChattieBaby client
+# Confundo client
 
 The React/Vite frontend connects to the FastAPI API for cookie-based authentication, account settings, owner-scoped chats and messages, Pillow-generated images, and private generation history. Set `VITE_API_BASE_URL` to the API origin before starting the dev server; it defaults to the existing deployed API.
 

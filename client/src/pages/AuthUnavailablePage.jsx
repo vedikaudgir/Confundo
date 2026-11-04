@@ -169,7 +169,7 @@ export function AuthUnavailablePage() {
                     </>
                 )}
                 <Link className="back-link" to="/">
-                    <ArrowLeft size={14} /> Back to ChattieBaby
+                    <ArrowLeft size={14} /> Back to Confundo
                 </Link>
             </div>
         </section>

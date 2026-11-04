@@ -51,17 +51,10 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="ChattieBaby", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins(),
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-CSRF-Token", "Authorization"],
-)
+api = FastAPI(title="ChattieBaby", lifespan=lifespan)
 
 
-@app.middleware("http")
+@api.middleware("http")
 async def protect_cookie_authenticated_writes(request: Request, call_next):
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         has_cookie_session = bool(
@@ -93,4 +86,13 @@ for router in (
     history.router,
     examples.router,
 ):
-    app.include_router(router)
+    api.include_router(router)
+
+
+app = CORSMiddleware(
+    app=api,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-CSRF-Token", "Authorization"],
+)

@@ -278,7 +278,7 @@ export function BuilderPage() {
             const downloadUrl = URL.createObjectURL(image);
             const link = document.createElement("a");
             link.href = downloadUrl;
-            link.download = `chattiebaby-${config.platform}.png`;
+            link.download = `confundo-${config.platform}.png`;
             document.body.appendChild(link);
             link.click();
             link.remove();

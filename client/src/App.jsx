@@ -56,21 +56,21 @@ function SiteLayout() {
 
     useEffect(() => {
         const titles = {
-            "/": "ChattieBaby — Make a chat worth sharing",
-            "/examples": "Fictional chat examples — ChattieBaby",
-            "/create": "Chat generator — ChattieBaby",
-            "/login": "Log in — ChattieBaby",
-            "/signup": "Create an account — ChattieBaby",
-            "/forgot-password": "Password help — ChattieBaby",
-            "/reset-password": "Reset password — ChattieBaby",
-            "/account": "Account & settings — ChattieBaby",
-            "/terms": "Terms — ChattieBaby",
-            "/privacy": "Privacy — ChattieBaby",
-            "/cookies": "Cookies — ChattieBaby",
-            "/faq": "FAQ — ChattieBaby",
-            "/about": "About — ChattieBaby",
+            "/": "Confundo — Make a chat worth sharing",
+            "/examples": "Fictional chat examples — Confundo",
+            "/create": "Chat generator — Confundo",
+            "/login": "Log in — Confundo",
+            "/signup": "Create an account — Confundo",
+            "/forgot-password": "Password help — Confundo",
+            "/reset-password": "Reset password — Confundo",
+            "/account": "Account & settings — Confundo",
+            "/terms": "Terms — Confundo",
+            "/privacy": "Privacy — Confundo",
+            "/cookies": "Cookies — Confundo",
+            "/faq": "FAQ — Confundo",
+            "/about": "About — Confundo",
         };
-        document.title = titles[location.pathname] || "ChattieBaby";
+        document.title = titles[location.pathname] || "Confundo";
         window.scrollTo(0, 0);
     }, [location.pathname]);
 
@@ -99,11 +99,11 @@ function SiteLayout() {
     return (
         <div className="app-shell" data-theme={theme}>
             <header className="site-header">
-                <Link className="brand" to="/" aria-label="ChattieBaby home">
+                <Link className="brand" to="/" aria-label="Confundo home">
                     <span className="brand-mark" aria-hidden="true">
                         <MessageSquareText size={19} strokeWidth={2} />
                     </span>
-                    <span>ChattieBaby</span>
+                    <span>Confundo</span>
                 </Link>
                 <nav className="site-nav" aria-label="Main navigation">
                     <NavLink to="/examples" className={({ isActive }) => isActive ? "site-nav__link is-active" : "site-nav__link"}>
@@ -140,7 +140,7 @@ function SiteLayout() {
                         <span className="brand-mark" aria-hidden="true">
                             <MessageSquareText size={17} strokeWidth={2} />
                         </span>
-                        <span>ChattieBaby</span>
+                        <span>Confundo</span>
                     </Link>
                     <p>Make a little story out of a chat.</p>
                     <span className="footer-fiction">Every example is fictional.</span>
@@ -159,7 +159,7 @@ function SiteLayout() {
                     <Link to="/cookies">Cookies</Link>
                 </div>
                 <div className="footer-bottom">
-                    <span>© {new Date().getFullYear()} ChattieBaby</span>
+                    <span>© {new Date().getFullYear()} Confundo</span>
                     <span>Chat screenshots are for creative and fictional use.</span>
                 </div>
             </footer>
